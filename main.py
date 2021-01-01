@@ -1,5 +1,9 @@
 import tensorflow as tf
 import tensorflow.keras as keras
+
+gpus = tf.config.experimental.list_physical_devices('GPU')
+tf.config.experimental.set_memory_growth(gpus[0], True)
+
 import os
 import random
 import shutil
@@ -53,9 +57,17 @@ def create_training_validation_folders(distribution):
     print(f'Validating cats: {len(os.listdir("./data/training/validate/cats"))}')
 
 
-create_training_validation_folders(0.8)
+#create_training_validation_folders(0.8)
 
-train_generator = ImageDataGenerator(rescale=1. / 255)
+train_generator = ImageDataGenerator(rescale=1. / 255,
+                                     rotation_range=40,
+                                     width_shift_range=0.2,
+                                     height_shift_range=0.2,
+                                     shear_range=0.2,
+                                     zoom_range=0.2,
+                                     horizontal_flip=True,
+                                     fill_mode='nearest')
+
 train_stream = train_generator.flow_from_directory('./data/training/train/',
                                                    target_size=(150, 150),
                                                    batch_size=10,
@@ -83,4 +95,12 @@ model.compile(optimizer=tf.optimizers.Adam(), loss=tf.losses.binary_crossentropy
 
 history = model.fit(train_stream, epochs=10, validation_data=validation_stream)
 
-model.save('catsdogs.h5')
+import matplotlib.pyplot as plt
+
+plt.plot(history.history['accuracy'], label='Accuracy (training data)')
+plt.plot(history.history['val_accuracy'], label='Accuracy (validation data)')
+plt.title('Accuracy')
+plt.ylabel('Accuracy value')
+plt.xlabel('No. epoch')
+plt.legend(loc="upper left")
+plt.show()
