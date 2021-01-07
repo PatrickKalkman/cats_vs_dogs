@@ -1,106 +1,155 @@
 import tensorflow as tf
 import tensorflow.keras as keras
-
-gpus = tf.config.experimental.list_physical_devices('GPU')
-tf.config.experimental.set_memory_growth(gpus[0], True)
+import matplotlib.pyplot as plt
+import pandas as pd
 
 import os
 import random
 import shutil
-from shutil import copyfile
-from os import path
-from tensorflow.keras.preprocessing.image import ImageDataGenerator
+import pathlib
+
+from keras_preprocessing.image import ImageDataGenerator
+
+gpus = tf.config.experimental.list_physical_devices('GPU')
+tf.config.experimental.set_memory_growth(gpus[0], True)
 
 
-def create_training_validation_folders(distribution):
-    images = os.listdir('./data/train_input/train/')
-    cats = list(filter(lambda image: 'cat' in image, images))
-    dogs = list(filter(lambda image: 'dog' in image, images))
-
-    random.shuffle(cats)
-    random.shuffle(dogs)
-
-    split_index = int(len(dogs) * distribution)
-    training_dogs = dogs[0:split_index]
-    validation_dogs = dogs[split_index:]
-    training_cats = cats[0:split_index]
-    validation_cats = cats[split_index:]
-
-    print(f'Cats: {len(cats)}, Dogs {len(dogs)}, total={len(images)}')
-    print(f'Cats train: {len(training_cats)}, validation {len(validation_cats)}')
-    print(f'Dogs train: {len(training_dogs)}, validation {len(validation_dogs)}')
-
-    if path.exists('./data/training/'):
-        shutil.rmtree('./data/training')
-
-    os.mkdir('./data/training')
-    os.mkdir('./data/training/train')
-    os.mkdir('./data/training/train/dogs')
-    os.mkdir('./data/training/train/cats')
-    os.mkdir('./data/training/validate')
-    os.mkdir('./data/training/validate/dogs')
-    os.mkdir('./data/training/validate/cats')
-
-    for dog in training_dogs:
-        copyfile(f'./data/train_input/train/{dog}', f'./data/training/train/dogs/{dog}')
-    for dog in validation_dogs:
-        copyfile(f'./data/train_input/train/{dog}', f'./data/training/validate/dogs/{dog}')
-    for cat in training_cats:
-        copyfile(f'./data/train_input/train/{cat}', f'./data/training/train/cats/{cat}')
-    for cat in validation_cats:
-        copyfile(f'./data/train_input/train/{cat}', f'./data/training/validate/cats/{cat}')
-
-    print(f'Training dogs: {len(os.listdir("./data/training/train/dogs"))}')
-    print(f'Validating dogs: {len(os.listdir("./data/training/validate/dogs"))}')
-
-    print(f'Training cats: {len(os.listdir("./data/training/train/cats"))}')
-    print(f'Validating cats: {len(os.listdir("./data/training/validate/cats"))}')
+def create_folder_structure():
+    shutil.rmtree('./train')
+    pathlib.Path("./train/train/dogs").mkdir(parents=True, exist_ok=True)
+    pathlib.Path("./train/train/cats").mkdir(parents=True, exist_ok=True)
+    pathlib.Path("./train/validate/dogs").mkdir(parents=True, exist_ok=True)
+    pathlib.Path("./train/validate/cats").mkdir(parents=True, exist_ok=True)
 
 
-#create_training_validation_folders(0.8)
+def copy_images(source_list, destination_path):
+    for image in source_list:
+        shutil.copyfile(f'./input_data/{image}', f'./train/{destination_path}/{image}')
 
-train_generator = ImageDataGenerator(rescale=1. / 255,
-                                     rotation_range=40,
-                                     width_shift_range=0.2,
-                                     height_shift_range=0.2,
-                                     shear_range=0.2,
-                                     zoom_range=0.2,
-                                     horizontal_flip=True,
-                                     fill_mode='nearest')
 
-train_stream = train_generator.flow_from_directory('./data/training/train/',
+def create_training_and_validation_set(train_validation_split):
+    cat_and_dog_images = os.listdir('./input_data')
+
+    cat_images = list(filter(lambda image: 'cat' in image, cat_and_dog_images))
+    dog_images = list(filter(lambda image: 'dog' in image, cat_and_dog_images))
+
+    random.shuffle(cat_images)
+    random.shuffle(dog_images)
+
+    split_index = int(len(cat_images) * train_validation_split)
+
+    training_cats = cat_images[:split_index]
+    validation_cats = cat_images[split_index:]
+    training_dogs = dog_images[:split_index]
+    validation_dogs = dog_images[split_index:]
+
+    create_folder_structure()
+    copy_images(training_dogs, 'train/dogs')
+    copy_images(training_cats, 'train/cats')
+    copy_images(validation_dogs, 'validate/dogs')
+    copy_images(validation_cats, 'validate/cats')
+
+
+def train_model():
+    train_gen = ImageDataGenerator(
+        rescale=1. / 255,
+        rotation_range=40,
+        width_shift_range=0.2,
+        height_shift_range=0.2,
+        shear_range=0.2,
+        zoom_range=0.2,
+        horizontal_flip=True,
+        fill_mode='nearest'
+    )
+
+    train_iterator = train_gen.flow_from_directory('./train/train',
                                                    target_size=(150, 150),
-                                                   batch_size=10,
+                                                   batch_size=20,
                                                    class_mode='binary')
 
-validation_generator = ImageDataGenerator(rescale=1. / 255)
-validation_stream = validation_generator.flow_from_directory('./data/training/validate/',
+    validation_gen = ImageDataGenerator(rescale=1. / 255.0)
+    validation_iterator = validation_gen.flow_from_directory('./train/validate',
                                                              target_size=(150, 150),
                                                              batch_size=10,
                                                              class_mode='binary')
 
-model = keras.models.Sequential([
-    keras.layers.Conv2D(16, (3, 3), activation=tf.nn.relu, input_shape=(150, 150, 3)),
-    keras.layers.MaxPooling2D((2, 2)),
-    keras.layers.Conv2D(32, (3, 3), activation=tf.nn.relu),
-    keras.layers.MaxPooling2D((2, 2)),
-    keras.layers.Conv2D(64, (3, 3), activation=tf.nn.relu),
-    keras.layers.MaxPooling2D((2, 2)),
-    keras.layers.Flatten(),
-    keras.layers.Dense(128, activation=tf.nn.relu),
-    keras.layers.Dense(1, activation=tf.nn.sigmoid)
-])
+    model = keras.models.Sequential([
+        keras.layers.Conv2D(16, (3, 3), activation=tf.nn.relu, input_shape=(150, 150, 3)),
+        keras.layers.MaxPool2D((2, 2)),
+        keras.layers.Conv2D(32, (3, 3), activation=tf.nn.relu),
+        keras.layers.MaxPool2D((2, 2)),
+        keras.layers.Conv2D(64, (3, 3), activation=tf.nn.relu),
+        keras.layers.MaxPool2D((2, 2)),
+        keras.layers.Flatten(),
+        keras.layers.Dense(units=512, activation=tf.nn.relu),
+        keras.layers.Dense(1, activation=tf.nn.sigmoid)
+    ])
 
-model.compile(optimizer=tf.optimizers.Adam(), loss=tf.losses.binary_crossentropy, metrics=['accuracy'])
+    model.compile(optimizer=tf.optimizers.Adam(),
+                  loss=tf.keras.losses.binary_crossentropy,
+                  metrics=['accuracy'])
 
-history = model.fit(train_stream, epochs=10, validation_data=validation_stream)
+    history = model.fit(train_iterator,
+                        validation_data=validation_iterator,
+                        steps_per_epoch=1000,
+                        epochs=50,
+                        validation_steps=500)
 
-import matplotlib.pyplot as plt
+    model.save('dogs-vs-cats.h5')
 
-plt.plot(history.history['accuracy'], label='Accuracy (training data)')
-plt.plot(history.history['val_accuracy'], label='Accuracy (validation data)')
-plt.title('Accuracy')
-plt.ylabel('Accuracy value')
-plt.xlabel('No. epoch')
-plt.legend(loc="upper left")
-plt.show()
+    return history
+
+
+def plot_result(history):
+    acc = history.history['accuracy']
+    val_acc = history.history['val_accuracy']
+    epochs = range(len(acc))
+
+    plt.plot(epochs, acc, 'b', label='Training accuracy')
+    plt.plot(epochs, val_acc, 'r', label='Validation accuracy')
+    plt.title('Training and validation accuracy')
+    plt.legend()
+    plt.figure()
+
+    loss = history.history['loss']
+    val_loss = history.history['val_loss']
+    plt.plot(epochs, loss, 'b', label='Training Loss')
+    plt.plot(epochs, val_loss, 'r', label='Validation Loss')
+    plt.title('Training and validation loss')
+    plt.legend()
+
+    plt.show()
+
+
+def load_and_predict():
+    model = keras.models.load_model('dogs-vs-cats.h5')
+
+    test_generator = ImageDataGenerator(rescale=1. / 255)
+
+    test_iterator = test_generator.flow_from_directory(
+        './input_test',
+        target_size=(150, 150),
+        shuffle=False,
+        class_mode='binary',
+        batch_size=1)
+
+    ids = []
+    for filename in test_iterator.filenames:
+        ids.append(int(filename.split('\\')[1].split('.')[0]))
+
+    predict_result = model.predict(test_iterator, steps=len(test_iterator.filenames))
+    predictions = []
+    for index, prediction in enumerate(predict_result):
+        predictions.append([ids[index], prediction[0]])
+    predictions.sort()
+
+    return predictions
+
+
+create_training_and_validation_set(0.8)
+result_history = train_model()
+plot_result(result_history)
+predictions = load_and_predict()
+df = pd.DataFrame(data=predictions, index=range(1, 12501), columns=['id', 'label'])
+df = df.set_index(['id'])
+df.to_csv('submission.csv')
